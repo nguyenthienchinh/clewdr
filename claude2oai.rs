@@ -79,7 +79,7 @@ pub fn transform_stream<I, E>(s: I) -> impl Stream<Item = Result<Event, E>>
 where
     I: Stream<Item = Result<eventsource_stream::Event, E>>,
 {
-    s.try_filter_map(async |eventsource_stream::Event { data, .. }| {
+    let body = s.try_filter_map(async |eventsource_stream::Event { data, .. }| {
         let Ok(parsed) = serde_json::from_str::<StreamEvent>(&data) else {
             return Ok(None);
         };
@@ -97,7 +97,13 @@ where
             }
             _ => Ok(None),
         }
-    })
+    });
+    // Close the stream the way OpenAI does: a final chunk with finish_reason, then [DONE].
+    let tail = futures::stream::iter(vec![
+        Ok::<Event, E>(delta_event(json!({}), json!("stop"))),
+        Ok(Event::default().data("[DONE]")),
+    ]);
+    body.chain(tail)
 }
 
 pub fn transforms_json(input: &CreateMessageResponse) -> Value {
@@ -378,6 +384,16 @@ mod tool_tests {
         assert_eq!(first, "write_file");
         let last = out.last().unwrap();
         assert_eq!(last.pointer("/choices/0/finish_reason").unwrap(), "tool_calls");
+    }
+
+    #[tokio::test]
+    async fn plain_stream_ends_with_finish_and_done() {
+        let events: Vec<_> = ["Xin ", "chào"].iter().map(|c| ev(c)).collect();
+        let sse = Sse::new(transform_stream(stream::iter(events))).into_response();
+        let bytes = to_bytes(sse.into_body(), usize::MAX).await.unwrap();
+        let text = String::from_utf8(bytes.to_vec()).unwrap();
+        assert!(text.contains("\"finish_reason\":\"stop\""), "{text}");
+        assert!(text.trim_end().ends_with("data: [DONE]"), "{text}");
     }
 
     #[tokio::test]
