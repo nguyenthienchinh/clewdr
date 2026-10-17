@@ -22,9 +22,6 @@ struct UploadResponse {
     file_uuid: String,
 }
 
-/// Model cố định gửi lên claude.ai cho chế độ web (đổi ở đây nếu ID khác).
-pub const PINNED_WEB_MODEL: &str = "claude-sonnet-5-5";
-
 impl ClaudeWebState {
     pub fn transform_request(&self, mut value: CreateMessageParams) -> Option<WebRequestBody> {
         let system = value.system.take();
@@ -40,9 +37,8 @@ impl ClaudeWebState {
             max_tokens_to_sample: value.max_tokens,
             attachments: vec![Attachment::new(merged.paste)],
             files: vec![],
-            // Ép model cố định: mọi request web đều dùng PINNED_WEB_MODEL,
-            // bất kể client yêu cầu Haiku hay model nào khác.
-            model: Some(PINNED_WEB_MODEL.to_string()),
+            // Gửi model cho mọi loại tài khoản (kể cả free) để claude.ai không rơi về model mặc định.
+            model: Some(value.model),
             rendering_mode: if value.stream.unwrap_or_default() {
                 "messages".to_string()
             } else {
